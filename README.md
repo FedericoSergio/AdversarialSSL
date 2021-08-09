@@ -1,2 +1,2 @@
 # AdversarialSSL
-#Adversarial Self-Supervised Learning on SimCLR framework
+## Adversarial Self-Supervised Learning on SimCLR framework
