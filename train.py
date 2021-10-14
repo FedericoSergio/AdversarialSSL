@@ -79,15 +79,15 @@ def make_optimizer_and_schedule(args, model, checkpoint, params, loader):
     """
     # Make optimizer
     param_list = model.parameters() if params is None else params
-    optimizer = ch.optim.Adam(param_list, args.lr, weight_decay=args.weight_decay)
+    optimizer = ch.optim.Adam(param_list, lr=args.lr, weight_decay=args.weight_decay)
 
     if args.mixed_precision:
         model.to('cuda')
         model, optimizer = amp.initialize(model, optimizer, 'O1')
 
     # Make schedule
-    schedule = ch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(loader), eta_min=0,
-                                                           last_epoch=-1)
+    schedule = None #ch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(loader), eta_min=0,
+                    #                                       last_epoch=-1)
 
     # Fast-forward the optimizer and the scheduler if resuming
     if checkpoint:
@@ -354,7 +354,8 @@ def train_model(args, model, loaders, *, checkpoint=None, dp_device_ids=None,
             save_checkpoint(consts.CKPT_NAME_LATEST)
             if is_best: save_checkpoint(consts.CKPT_NAME_BEST)
 
-        if schedule: schedule.step()
+        if (epoch >= 10):
+            if schedule: schedule.step()
         if has_attr(args, 'epoch_hook'): args.epoch_hook(model, log_info)
 
     return model
@@ -406,7 +407,7 @@ def _model_loop(args, loop_type, loader, model, opt, epoch, adv, writer):
     has_custom_train_loss = has_attr(args, 'custom_train_loss')
     train_criterion = args.custom_train_loss if has_custom_train_loss \
             else ch.nn.CrossEntropyLoss()
-    
+
     has_custom_adv_loss = has_attr(args, 'custom_adv_loss')
     adv_criterion = args.custom_adv_loss if has_custom_adv_loss else None
 
@@ -420,7 +421,13 @@ def _model_loop(args, loop_type, loader, model, opt, epoch, adv, writer):
             'random_start': args.random_start,
             'custom_loss': adv_criterion,
             'random_restarts': random_restarts,
-            'use_best': bool(args.use_best)
+            'use_best': bool(args.use_best),
+            'bypass' : args.bypass
+
+            # Params to attack with info_nce_loss
+            #'batch_size' : args.batch_size,
+            #'n_views' : args.n_views,
+            #'temperature' : args.temperature
         }
 
     iterator = tqdm(enumerate(loader), total=len(loader))
@@ -430,15 +437,15 @@ def _model_loop(args, loop_type, loader, model, opt, epoch, adv, writer):
 
         output, final_inp = model(inp, target=target, make_adv=adv,
                                   **attack_kwargs)
-
-        logits, labels = info_nce_loss(args, output)
-        
-        # calculate loss with cross entrpy or custom loss
-        loss = train_criterion(logits, labels)
+                                  
+        loss = train_criterion(output, target)
 
         if len(loss.shape) > 0: loss = loss.mean()
 
         model_logits = output[0] if (type(output) is tuple) else output
+
+        # make target 0 to calculate accuracy
+        target = ch.zeros(model_logits.shape[0], dtype=ch.long).cuda()
 
         # measure accuracy and record loss
         top1_acc = float('nan')
@@ -446,7 +453,7 @@ def _model_loop(args, loop_type, loader, model, opt, epoch, adv, writer):
         try:
             maxk = min(5, model_logits.shape[-1])
             if has_attr(args, "custom_accuracy"):
-                prec1, prec5 = args.custom_accuracy(model_logits, target)
+                prec1, prec5 = args.custom_accuracy(model_logits, target, topk=(1, maxk))
             else:
                 prec1, prec5 = helpers.accuracy(model_logits, target, topk=(1, maxk))
                 prec1, prec5 = prec1[0], prec5[0]
@@ -478,11 +485,14 @@ def _model_loop(args, loop_type, loader, model, opt, epoch, adv, writer):
             opt.step()
         elif adv and i == 0 and writer:
             # add some examples to the tensorboard
-            nat_grid = make_grid(inp[:15, ...])
-            adv_grid = make_grid(final_inp[:15, ...])
-            writer.add_image('Nat input', nat_grid, epoch)
-            writer.add_image('Adv input', adv_grid, epoch)
-
+            nat0_image = make_grid(inp[0, ...])
+            #nat1_image = make_grid(inp[args.batch_size, ...])
+            adv0_image = make_grid(final_inp[0, ...])
+            #adv1_image = make_grid(final_inp[args.batch_size, ...])
+            writer.add_image('Positive Pair 1', nat0_image, epoch)
+            #writer.add_image('Positive Pair 2', nat1_image, epoch)
+            writer.add_image('Positive Pair 1 - Adversarial', adv0_image, epoch)
+            #writer.add_image('Positive Pair 2 - Adversarial', adv1_image, epoch)
         # ITERATOR
         desc = ('{2} Epoch:{0} | Loss {loss.avg:.4f} | '
                 '{1}1 {top1_acc:.3f} | {1}5 {top5_acc:.3f} | '
@@ -505,43 +515,3 @@ def _model_loop(args, loop_type, loader, model, opt, epoch, adv, writer):
                               epoch)
 
     return top1.avg, losses.avg
-
-def info_nce_loss(args, features):
-
-        #if (features.shape[0] == args.batch_size):
-        #    labels = ch.cat([ch.arange(args.batch_size) for i in range(args.n_views)], dim=0)
-        #else:
-        #    labels = ch.cat([ch.arange(features.shape[0]/args.n_views) for i in range(args.n_views)], dim=0)
-
-        labels = ch.cat([ch.arange(args.batch_size) for i in range(args.n_views)], dim=0)
-
-        labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
-        labels = labels.cuda()
-
-        features = ch.nn.functional.normalize(features, dim=1)
-
-        similarity_matrix = ch.matmul(features, features.T)
-        # assert similarity_matrix.shape == (
-        #     self.args.n_views * self.args.batch_size, self.args.n_views * self.args.batch_size)
-        # assert similarity_matrix.shape == labels.shape
-            
-
-        # discard the main diagonal from both: labels and similarities matrix
-        mask = ch.eye(labels.shape[0], dtype=ch.bool).cuda()
-        labels = labels[~mask].view(labels.shape[0], -1)
-        #print(similarity_matrix.shape[0])
-        #print(labels.shape[0])
-        similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
-        # assert similarity_matrix.shape == labels.shape
-
-        # select and combine multiple positives
-        positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
-
-        # select only the negatives the negatives
-        negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
-
-        logits = ch.cat([positives, negatives], dim=1)
-        labels = ch.zeros(logits.shape[0], dtype=ch.long).cuda()
-
-        logits = logits / args.temperature
-        return logits, labels

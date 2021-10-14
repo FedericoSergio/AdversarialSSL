@@ -35,7 +35,7 @@ def main(args, store=None):
     trains as a model. Check out the argparse object in this file for
     argument options.
     '''
-    
+
     # MAKE DATASET AND LOADERS
     data_path = os.path.expandvars(args.data)
     dataset = DATASETS[args.dataset](data_path)
@@ -47,63 +47,24 @@ def main(args, store=None):
     val_loader = helpers.DataPrefetcher(val_loader)
     loaders = (train_loader, val_loader)
 
+    args.resume = 'Test/CIFAR100/ADV/[cifar100]_BS=256_LR=0.0001_eps=2/checkpoint.pt.latest'
+
+
     # MAKE MODEL
     model, checkpoint = make_and_restore_model(arch=args.arch,
             dataset=dataset, resume_path=args.resume)
     if 'module' in dir(model): model = model.module
 
-    # Projection Head
-    dim_mlp = model.model.linear.in_features
-    model.model.linear = ch.nn.Sequential(ch.nn.Linear(dim_mlp, dim_mlp), ch.nn.ReLU(), model.model.linear)
+    # Freeze model parameters for fine tuning
+    for param in model.model.parameters():
+        param.requires_grad = False
+
+    # Add linear Layer at the end of the model
+    model.model.linear = ch.nn.Linear(model.model.linear.in_features, dataset.num_classes)
 
     print(args)
     if args.eval_only:
         return eval_model(args, model, val_loader, store=store)
- 
-    # Defining custom loss     
-    def custom_train_loss(logits, targ):
-        labels = ch.cat([ch.arange(args.batch_size) for i in range(args.n_views)], dim=0)
-
-        labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
-        labels = labels.cuda()
-
-        features = ch.nn.functional.normalize(logits, dim=1)
-
-        similarity_matrix = ch.matmul(features, features.T)
-        # assert similarity_matrix.shape == (
-        #     self.args.n_views * self.args.batch_size, self.args.n_views * self.args.batch_size)
-        # assert similarity_matrix.shape == labels.shape
-            
-
-        # discard the main diagonal from both: labels and similarities matrix
-        mask = ch.eye(labels.shape[0], dtype=ch.bool).cuda()
-        labels = labels[~mask].view(labels.shape[0], -1)
-        #print(similarity_matrix.shape[0])
-        #print(labels.shape[0])
-        similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
-        # assert similarity_matrix.shape == labels.shape
-
-        # select and combine multiple positives
-        #print(similarity_matrix.shape)
-        positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
-
-        # select only the negatives the negatives
-        negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
-
-        logits = ch.cat([positives, negatives], dim=1)
-        labels = ch.zeros(logits.shape[0], dtype=ch.long).cuda()
-
-        logits = logits / args.temperature
-
-        loss_fun = ch.nn.CrossEntropyLoss()
-        loss = loss_fun(logits, labels)
-        
-        return loss, logits
-
-    custom_adv_loss = custom_train_loss
-
-    args.custom_train_loss = custom_train_loss
-    args.custom_adv_loss = custom_adv_loss
 
     if not args.resume_optimizer: checkpoint = None
     model = train_model(args, model, loaders, store=store,
@@ -141,10 +102,10 @@ def setup_store_with_metadata(args):
     '''
 
     if (args.exp_name == None):
-        if (args.adv_train == 1):
+        if (args.adv):
             args.exp_name = "[" + str(args.dataset) + "]_BS=" + str(args.batch_size) + "_LR=" + str(args.lr) + "_eps=" + str(args.eps) #+ "_bypass=" + str(args.bypass)
         else:
-            args.exp_name = "[" + str(args.dataset) + "]_BS=" + str(args.batch_size) + "_LR=" + str(args.lr)
+            args.exp_name = "[" + str(args.dataset) + "]_BS=" + str(args.batch_size) + "_LR=" + str(args.lr) + "_ADVmodelEPS=2"
         #args.exp_name = date.today().strftime("%B_%d_%Y" + datetime.now().strftime("-%H:%M:%S-") + str(args.dataset))
 
     # Create the store

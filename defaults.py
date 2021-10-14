@@ -87,13 +87,13 @@ TRAINING_ARGS = [
     ['step-lr-gamma', float, 'multiplier by which LR drops in step scheduler', 0.1],
     ['custom-lr-multiplier', str, 'LR multiplier sched (format: [(epoch, LR),...])', None],
     ['lr-interpolation', ["linear", "step"], 'Drop LR as step function or linearly', "step"],
-    ['adv-train', [0, 1], 'whether to train adversarially', REQ],
+    ['adv-train', [0, 1], 'whether to train adversarially', 0],
     ['adv-eval', [0, 1], 'whether to adversarially evaluate', None], 
     ['log-iters', int, 'how frequently (in epochs) to log', 5],
     ['save-ckpt-iters', int, 'how frequently (epochs) to save \
             (-1 for none, only saves best and last)', -1],
     ['n-views', int, 'parameter n_views of SimCLR model', 2],
-    ['temperature', float, 'cross-entrpy loss parameter in SimCLR model', 0.07]
+    ['temperature', float, 'cross-entrpy loss parameter in SimCLR model', 0.07] # try also 0.5 (simCLR paper)
 ]
 """
 Arguments essential for the `train_model` function.
@@ -103,14 +103,15 @@ BY_DATASET=looked up in TRAINING_DEFAULTS at runtime)]`
 """
 
 PGD_ARGS = [
+    ['bypass', [0, 1, 2], 'apply adv only to pos or neg pairs', 0], 
     ['attack-steps', int, 'number of steps for PGD attack', 7],
     ['constraint', list(attacker.STEPS.keys()), 'adv constraint', REQ],
     ['eps', str , 'adversarial perturbation budget', REQ],
     ['attack-lr', str, 'step size for PGD', REQ],
     ['use-best', [0, 1], 'if 1 (0) use best (final) PGD step as example', 1],
     ['random-restarts', int, 'number of random PGD restarts for eval', 0],
-    ['random-start', [0, 1], 'start with random noise instead of pgd step', 0],
-    ['custom-eps-multiplier', str, 'eps mult. sched (same format as LR)', None]
+    ['random-start', [0, 1], 'start with random noise instead of pgd step', 0]
+    #['custom-eps-multiplier', str, 'eps mult. sched (same format as LR)', None]
 ]
 """
 Arguments essential for the :meth:`robustness.train.train_model` function if
@@ -125,11 +126,12 @@ MODEL_LOADER_ARGS = [
     ['data', str, 'path to the dataset', '/tmp/'],
     ['arch', str, 'architecture (see {cifar,imagenet}_models/', REQ],
     ['batch-size', int, 'batch size for data loading', BY_DATASET],
-    ['workers', int, '# data loading workers', 30],
+    ['workers', int, '# data loading workers', 32],
     ['resume', str, 'path to checkpoint to resume from', None],
     ['resume-optimizer', [0, 1], 'whether to also resume optimizers', 0],
     ['data-aug', [0, 1], 'whether to use data augmentation', 1],
-    ['mixed-precision', [0, 1], 'whether to use MP training (faster)', 0],
+    ['mixed-precision', [0, 1], 'whether to use MP training (faster)', 0]
+    #['pretrain', [0, 1], 'whether to use pretrain model', 0]
 ]
 """
 Arguments essential for constructing the model and dataloaders that will be fed

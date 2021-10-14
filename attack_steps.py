@@ -119,12 +119,26 @@ class L2Step(AttackerStep):
         diff = diff.renorm(p=2, dim=0, maxnorm=self.eps)
         return ch.clamp(self.orig_input + diff, 0, 1)
 
-    def step(self, x, g):
+    def step(self, x, g, bypass):
         """
         """
         l = len(x.shape) - 1
         g_norm = ch.norm(g.view(g.shape[0], -1), dim=1).view(-1, *([1]*l))
         scaled_g = g / (g_norm + 1e-10)
+
+        # Attack only positive pairs
+        if (bypass == 1):
+            for i in range(scaled_g.shape[0]):
+                if i != 0 or i != scaled_g.shape[0]/2:
+                    scaled_g[i, ...] = ch.zeros(size=(scaled_g.shape[1], scaled_g.shape[2], scaled_g.shape[3]))
+            
+
+        # Attack only negative pairs
+        if (bypass == 2):
+            scaled_g[0, ...] = ch.zeros(size=(scaled_g.shape[1], scaled_g.shape[2], scaled_g.shape[3]))
+            scaled_g[int(scaled_g.shape[0]/2), ...] = ch.zeros(size=(scaled_g.shape[1], scaled_g.shape[2], scaled_g.shape[3]))
+
+
         return x + scaled_g * self.step_size
 
     def random_perturb(self, x):

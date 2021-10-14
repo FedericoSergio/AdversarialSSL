@@ -69,7 +69,7 @@ class Attacker(ch.nn.Module):
         self.normalize = helpers.InputNormalize(dataset.mean, dataset.std)
         self.model = model
 
-    def forward(self, x, target, *_, constraint, eps, step_size, iterations,
+    def forward(self, x, target, *_, constraint, eps, step_size, iterations, bypass,
                 random_start=False, random_restarts=False, do_tqdm=False,
                 targeted=False, custom_loss=None, should_normalize=True,
                 orig_input=None, use_best=True, return_image=True,
@@ -152,12 +152,12 @@ class Attacker(ch.nn.Module):
             Uses custom loss (if provided) otherwise the criterion
             '''
             if should_normalize:
-                inp = self.normalize(inp)
+                inp = self.normalize(inp)         
             output = self.model(inp)
-            if custom_loss:
-                return custom_loss(self.model, inp, target)
 
-            return criterion(output, target), output
+            loss = custom_loss(output, target)
+
+            return loss
 
         # Main function for making adversarial examples
         def get_adv_examples(x):
@@ -188,9 +188,9 @@ class Attacker(ch.nn.Module):
             # PGD iterates
             for _ in iterator:
                 x = x.clone().detach().requires_grad_(True)
-                losses, out = calc_loss(step.to_image(x), target)
-                assert losses.shape[0] == x.shape[0], \
-                        'Shape of losses must match input!'
+                losses = calc_loss(inp=step.to_image(x), target=target)
+                #assert losses.shape[0] == x.shape[0], \
+                #        'Shape of losses must match input!'
 
                 loss = ch.mean(losses)
 
@@ -203,7 +203,7 @@ class Attacker(ch.nn.Module):
                     elif (est_grad is None):
                         grad, = ch.autograd.grad(m * loss, [x])
                     else:
-                        f = lambda _x, _y: m * calc_loss(step.to_image(_x), _y)[0]
+                        f = lambda _x, _y: m * calc_loss(inp=step.to_image(_x), target=_y)[0]
                         grad = helpers.calc_est_grad(f, x, target, *est_grad)
                 else:
                     grad = None
@@ -212,7 +212,7 @@ class Attacker(ch.nn.Module):
                     args = [losses, best_loss, x, best_x]
                     best_loss, best_x = replace_best(*args) if use_best else (losses, x)
 
-                    x = step.step(x, grad)
+                    x = step.step(x, grad, bypass)
                     x = step.project(x)
                     if do_tqdm: iterator.set_description("Current loss: {l}".format(l=loss))
 
@@ -221,7 +221,7 @@ class Attacker(ch.nn.Module):
                 ret = x.clone().detach()
                 return step.to_image(ret) if return_image else ret
 
-            losses, _ = calc_loss(step.to_image(x), target)
+            losses = calc_loss(inp=step.to_image(x), target=target)
             args = [losses, best_loss, x, best_x]
             best_loss, best_x = replace_best(*args)
             return step.to_image(best_x) if return_image else best_x
@@ -323,8 +323,11 @@ class AttackerModel(ch.nn.Module):
         if no_relu and fake_relu:
             raise ValueError("Options 'no_relu' and 'fake_relu' are exclusive")
 
-        output = self.model(normalized_inp, with_latent=with_latent,
-                                fake_relu=fake_relu, no_relu=no_relu)
+        #output = self.model(normalized_inp, with_latent=with_latent,
+        #                        fake_relu=fake_relu, no_relu=no_relu)
+
+        output = self.model(normalized_inp)
+        
         if with_image:
             return (output, inp)
         return output

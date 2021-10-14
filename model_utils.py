@@ -99,7 +99,9 @@ def make_and_restore_model(*_, arch, dataset, resume_path=None,
 
         sd = checkpoint[state_dict_path]
         sd = {k[len('module.'):]:v for k,v in sd.items()}
-        model.load_state_dict(sd)
+
+        model.load_state_dict(sd, strict=False)
+
         print("=> loaded checkpoint '{}' (epoch {})".format(resume_path, checkpoint['epoch']))
     elif resume_path:
         error_msg = "=> no checkpoint found at '{}'".format(resume_path)

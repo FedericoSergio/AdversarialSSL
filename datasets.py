@@ -18,9 +18,11 @@ datasets to the library.
 import pathlib
 
 import torch as ch
+import torch.nn as nn
 import torch.utils.data
 from . import cifar_models
-from torchvision import transforms, datasets
+from .cifar_models.resnet_simclr import ResNetSimCLR
+from torchvision import transforms, datasets, models
 from .data_aug.view_generator import ContrastiveLearningViewGenerator
 
 
@@ -356,8 +358,8 @@ class CIFAR(DataSet):
             'std': ch.tensor([0.2023, 0.1994, 0.2010]),
             'custom_class': datasets.CIFAR10,
             'label_mapping': None,
-            'transform_train': ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32)),
-            'transform_test': ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32))
+            'transform_train': da.TRAIN_TRANSFORMS_DEFAULT(32), #ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32)),
+            'transform_test': da.TEST_TRANSFORMS_DEFAULT(32) #ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32))
         }
         ds_kwargs = self.override_args(ds_kwargs, kwargs)
         super(CIFAR, self).__init__('cifar', data_path, **ds_kwargs)
@@ -368,6 +370,7 @@ class CIFAR(DataSet):
         if pretrained:
             raise ValueError('CIFAR does not support pytorch_pretrained=True')
         return cifar_models.__dict__[arch](num_classes=self.num_classes)
+        #return ResNetSimCLR(arch, self.num_classes)
 
 class CIFAR100(DataSet):
     """
@@ -400,8 +403,8 @@ class CIFAR100(DataSet):
             'std': ch.tensor([0.2673, 0.2564, 0.2762]),
             'custom_class': datasets.CIFAR100,
             'label_mapping': None,
-            'transform_train': ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32)),
-            'transform_test': ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32))
+            'transform_train': da.TRAIN_TRANSFORMS_DEFAULT(32),   # #ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32)),
+            'transform_test': da.TEST_TRANSFORMS_DEFAULT(32)   #ContrastiveLearningViewGenerator(da.SIMCLR_TRANSFORMS(32))
         }
         ds_kwargs = self.override_args(ds_kwargs, kwargs)
         super(CIFAR100, self).__init__('cifar100', data_path, **ds_kwargs)
@@ -410,8 +413,9 @@ class CIFAR100(DataSet):
         """
         """
         if pretrained:
-            raise ValueError('CIFAR does not support pytorch_pretrained=True')
+            raise ValueError('CIFAR100 does not support pytorch_pretrained=True')
         return cifar_models.__dict__[arch](num_classes=self.num_classes)
+        #return ResNetSimCLR(arch, self.num_classes)
 
 class STL10(DataSet):
     """
@@ -439,6 +443,7 @@ class STL10(DataSet):
         if pretrained:
             raise ValueError('STL10 does not support pytorch_pretrained=True')
         return cifar_models.__dict__[arch](num_classes=self.num_classes)
+        #return ResNetSimCLR(arch, self.num_classes)
 
 
 class CINIC(DataSet):
