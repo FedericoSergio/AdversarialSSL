@@ -36,7 +36,7 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                          'using Data Parallel or Distributed Data Parallel', dest='bs')
 parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
-parser.add_argument('--eps', '--eps', default=0.2, type=float,
+parser.add_argument('--eps', '--eps', default=0.5, type=float,
                     metavar='EPS', help='epsilon parameter for adversarial training', dest='eps')
 
 

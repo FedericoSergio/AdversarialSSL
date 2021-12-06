@@ -7,20 +7,17 @@ import attacker
 from exceptions.exceptions import InvalidBackboneError
 
 
-class ResNetSimCLR(nn.Module):
+class ResNetEval(nn.Module):
 
-    def __init__(self, base_model, out_dim):
-        super(ResNetSimCLR, self).__init__()
+    def __init__(self, base_model, out_dim, adv=False):
+        super(ResNetEval, self).__init__()
         self.resnet_dict = {"resnet18": models.resnet18(pretrained=False, num_classes=out_dim),
                             "resnet50": models.resnet50(pretrained=False, num_classes=out_dim)}
 
         self.backbone = self._get_basemodel(base_model)
-        dim_mlp = self.backbone.fc.in_features
-
-        # add mlp projection head
-        self.backbone.fc = nn.Sequential(nn.Linear(dim_mlp, dim_mlp, bias=False), nn.ReLU(), self.backbone.fc)
-
-        self.attacker = attacker.Attacker(self.backbone)
+        
+        if(adv==True):
+            self.attacker = attacker.Attacker(self.backbone)
 
     def _get_basemodel(self, model_name):
         try:
@@ -31,7 +28,7 @@ class ResNetSimCLR(nn.Module):
         else:
             return model
 
-    def forward(self, inp, target, make_adv, **attacker_kwargs):
+    def forward(self, inp, target=None, make_adv=False, **attacker_kwargs):
         if make_adv:
             assert target is not None
             prev_training = bool(self.training)

@@ -101,8 +101,6 @@ class SimCLR(object):
             make_adv = True
 
         n_iter = 0
-        
-
 
         for epoch_counter in range(self.args.epochs):
             
@@ -119,24 +117,6 @@ class SimCLR(object):
                 with autocast(enabled=self.args.fp16_precision):
                     features, adv_img = self.model(images, target, make_adv, **attack_kwargs)
                     loss, logits, labels = self.info_nce_loss(features, target)
-
-                predictions = torch.argmax(logits, dim=1)
-                for sampleno in range(images[0].shape[0]):
-                    if(target[sampleno]!=predictions[sampleno]):
-                        # First pair image
-                        mis_nat_img_0 = images[sampleno]
-                        mis_nat_img_1 = images[sampleno + self.args.bs]
-
-                        # Second pair image
-                        mis_adv_img_0 = adv_img[sampleno]
-                        mis_adv_img_1 = adv_img[sampleno + self.args.bs]
-
-                        # print('tar: '+str(target[sampleno]))
-                        # # Store number of missed classes for each class
-                        # missed_classes = missed_classes[0, target[sampleno]] + 1
-
-                        # print(missed_classes)
-
 
                 prec1, prec5 = accuracy(logits, labels, topk=(1, 5))
                 prec1, prec5 = prec1[0], prec5[0]
@@ -167,13 +147,6 @@ class SimCLR(object):
                     #self.writer.add_scalar('learning_rate', self.scheduler.get_lr()[0], global_step=n_iter)
                 n_iter += 1
 
-            # Print missclasified image and respective adversarial version
-            mis_nat_pair = make_grid([mis_nat_img_0, mis_nat_img_1])
-            mis_adv_pair = make_grid([mis_adv_img_0, mis_adv_img_1])
-            self.writer.add_image('Misclassified Natural Image', mis_nat_pair, epoch_counter)
-            self.writer.add_image('Misclassified Adversarial Image', mis_adv_pair, epoch_counter)
-
-            # Store loss at the end of the epoch
             self.writer.add_scalar('loss (iterations)', loss, global_step=n_iter)
             
             if self.writer is not None:
