@@ -1,5 +1,4 @@
-from AdversarialSSL.models.resnet_simclr import ResNetSimCLR
-from models.resnet_eval import ResNetEval
+from models.make_adv import make_adv
 import torch
 import torch.backends.cudnn as cudnn
 from torchvision import models
@@ -50,11 +49,11 @@ parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
 
-parser.add_argument('--checkpoint', default='../runs/FT/[cifar100-cifar10]_BS=256_LR=8e-05_ADVModelEps=0.5/checkpoint_0500.pth.tar',
+parser.add_argument('--checkpoint', default='../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_ADVModelEps=0.3/checkpoint_0500.pth.tar',
                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
 parser.add_argument('--pretrained-dataset', default='cifar10',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
-parser.add_argument('--eps', '--eps', default=0.2, type=float,
+parser.add_argument('--eps', '--eps', default=0.3, type=float,
                     metavar='EPS', help='WARNING! Only to point out eps of pretrained model in filename', dest='eps')
 parser.add_argument('--range', '--range', default=1, type=int,
                     metavar='RANGE', help='...', dest='range')
@@ -142,22 +141,23 @@ def main():
     logging.basicConfig(filename=os.path.join(writer.log_dir, 'training.log'), level=logging.DEBUG)
 
     if args.dataset_name == 'cifar10':
-        model = ResNetEval(base_model=args.arch, out_dim=10).to(device)
+        model = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
     elif args.dataset_name == 'cifar100':
-        model = ResNetEval(base_model=args.arch, out_dim=100).to(device)
+        model = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
     
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
     state_dict = checkpoint['state_dict']
 
-    for k in list(state_dict.keys()):
-        if k.startswith('backbone.'):
-            if k.startswith('backbone') and not k.startswith('backbone.fc'):
-                # remove prefix
-                state_dict[k[len("backbone."):]] = state_dict[k]
-        del state_dict[k]
-
-    log = model.load_state_dict(state_dict, strict=False)
+    # for k in list(state_dict.keys()):
+    #     if k.startswith('backbone.'):
+    #         if k.startswith('backbone') and not k.startswith('backbone.fc'):
+    #             # remove prefix
+    #             state_dict[k[len("backbone."):]] = state_dict[k]
+    #     del state_dict[k]
+    
+    log = model.load_state_dict(state_dict, strict=True)
+    model.eval()
 
     if args.dataset_name == 'cifar10':
         train_loader, test_loader = get_cifar10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
@@ -170,10 +170,14 @@ def main():
     print("Dataset:", args.dataset_name)
 
 
-    # freeze all layers but the last fc
-    for name, param in model.named_parameters():
-        if name not in ['fc.weight', 'fc.bias']:
-            param.requires_grad = False
+    # # freeze all layers but the last fc
+    # for name, param in model.named_parameters():
+    #     if name not in ['backbone.fc.weight', 'backbone.fc.bias']:
+    #         param.requires_grad = False
+    
+    # parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+    # assert len(parameters) == 2  # fc.weight, fc.bias
+
     print(args)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -207,10 +211,15 @@ def main():
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
 
-            logits, adv_img = model(x_batch, y_batch, make_adv=True, **attack_kwargs)
-            top1, top5 = accuracy(logits, y_batch, topk=(1,5))
-            top1_accuracy += top1[0]
-            top5_accuracy += top5[0]
+            adv_img = make_adv(model, x_batch, y_batch, **attack_kwargs)
+
+            #print(adv_img.shape())
+
+            with torch.no_grad():
+                logits = model(adv_img)
+                top1, top5 = accuracy(logits, y_batch, topk=(1,5))
+                top1_accuracy += top1[0]
+                top5_accuracy += top5[0]
 
             predictions = torch.argmax(logits, dim=1)
             for sampleno in range(x_batch.size(0)):

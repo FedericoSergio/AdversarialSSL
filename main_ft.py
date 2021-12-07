@@ -1,3 +1,4 @@
+from models.make_adv import make_adv
 from models.resnet_simclr import ResNetSimCLR
 import torch
 import torch.backends.cudnn as cudnn
@@ -252,71 +253,72 @@ def main():
 
 
 
-    # attack_kwargs = {
-    #         'eps': args.eps,
-    #         'step_size': 1,
-    #         'iterations': 3
-    #         #'bypass' : 0
-    #     }
-    # model = ResNetEval(base_model=args.arch, out_dim=10).to(device)
+    attack_kwargs = {
+            'eps': args.eps,
+            'step_size': 1,
+            'iterations': 3
+            #'bypass' : 0
+        }
 
-    # nat_mis = torch.zeros([1, 3, 32, 32])
-    # adv_mis = torch.zeros([1, 3, 32, 32])
-    # missed_class = torch.zeros([10])
-    # correct_class = torch.zeros([10])
+    nat_mis = torch.zeros([1, 3, 32, 32])
+    adv_mis = torch.zeros([1, 3, 32, 32])
+    missed_class = torch.zeros([10])
+    correct_class = torch.zeros([10])
 
-    # top1_accuracy = 0
-    # top5_accuracy = 0
+    top1_accuracy = 0
+    top5_accuracy = 0
 
-    # for counter, (x_batch, y_batch) in enumerate(test_loader):
-    #     x_batch = x_batch.to(device)
-    #     y_batch = y_batch.to(device)
+    for counter, (x_batch, y_batch) in enumerate(test_loader):
+        x_batch = x_batch.to(device)
+        y_batch = y_batch.to(device)
 
-    #     with torch.no_grad():
-    #         logits, adv_img = model(x_batch, y_batch, make_adv=True, **attack_kwargs)
-    #         top1, top5 = accuracy(logits, y_batch, topk=(1,5))
-    #         top1_accuracy += top1[0]
-    #         top5_accuracy += top5[0]
+        adv_img = make_adv(x_batch, y_batch, **attack_kwargs)
 
-    #     predictions = torch.argmax(logits, dim=1)
-    #     for sampleno in range(x_batch.size(0)):
-    #         if(y_batch[sampleno]!=predictions[sampleno]):
+        with torch.no_grad():
+            logits = model(adv_img)
+            top1, top5 = accuracy(logits, y_batch, topk=(1,5))
+            top1_accuracy += top1[0]
+            top5_accuracy += top5[0]
+
+        predictions = torch.argmax(logits, dim=1)
+        for sampleno in range(x_batch.size(0)):
+            if(y_batch[sampleno]!=predictions[sampleno]):
                     
-    #             # Store first i misclassification in tensorboard
-    #             for i in range(1):
-    #                 if torch.equal(nat_mis[i, ...], torch.zeros([3, 32, 32])):
-    #                     nat_mis[i] = x_batch[sampleno]
-    #                     adv_mis[i] = adv_img[sampleno]
-    #                     print(f"|Step {counter}|:\tReal Label: {y_batch[sampleno]}\tPredicted: {predictions[sampleno]}")
-    #                     break
+                # Store first i misclassification in tensorboard
+                for i in range(1):
+                    if torch.equal(nat_mis[i, ...], torch.zeros([3, 32, 32])):
+                        nat_mis[i] = x_batch[sampleno]
+                        adv_mis[i] = adv_img[sampleno]
+                        print(f"|Step {counter}|:\tReal Label: {y_batch[sampleno]}\tPredicted: {predictions[sampleno]}")
+                        break
                     
-    #             missed_class[y_batch[sampleno]] += 1    
-    #         else:
-    #             correct_class[y_batch[sampleno]] += 1
+                missed_class[y_batch[sampleno]] += 1    
+            else:
+                correct_class[y_batch[sampleno]] += 1
 
-    #     writer.add_scalar('acc/FT/TEST_acc-Top1', top1_accuracy.item()/(counter+1), global_step=n_iter_test)
-    #     writer.add_scalar('acc/FT/TEST_acc-Top5', top5_accuracy.item()/(counter+1), global_step=n_iter_test)
+        writer.add_scalar('acc/FT/TEST_acc-Top1', top1_accuracy.item()/(counter+1), global_step=n_iter_test)
+        writer.add_scalar('acc/FT/TEST_acc-Top5', top5_accuracy.item()/(counter+1), global_step=n_iter_test)
             
-    #     # Print missclasified image and respective adversarial version
-    #     # nat_image = make_grid(nat_mis[:args.range, ...])
-    #     # adv_image = make_grid(adv_mis[:args.range, ...])
-    #     writer.add_image('Misclassified Natural Image', nat_mis[i] , counter)
-    #     writer.add_image('Misclassified Adversarial Image', adv_mis[i], counter)
+        # Print missclasified image and respective adversarial version
+        # nat_image = make_grid(nat_mis[:args.range, ...])
+        # adv_image = make_grid(adv_mis[:args.range, ...])
+        writer.add_image('Misclassified Natural Image', nat_mis[i] , counter)
+        writer.add_image('Misclassified Adversarial Image', adv_mis[i], counter)
 
-    #     # Reset images visualization tensors
-    #     nat_mis = torch.zeros([1, 3, 32, 32])
-    #     adv_mis = torch.zeros([1, 3, 32, 32])
+        # Reset images visualization tensors
+        nat_mis = torch.zeros([1, 3, 32, 32])
+        adv_mis = torch.zeros([1, 3, 32, 32])
 
-    #     n_iter_test += 1
+        n_iter_test += 1
     
-    # top1_accuracy /= (counter + 1)
-    # top5_accuracy /= (counter + 1)
+    top1_accuracy /= (counter + 1)
+    top5_accuracy /= (counter + 1)
 
-    # print(f"Missed Classes: {missed_class.t()}")
-    # print(f"Correct Classes: {correct_class.t()}")
+    print(f"Missed Classes: {missed_class.t()}")
+    print(f"Correct Classes: {correct_class.t()}")
 
-    # # Store loss at the end of the epoch
-    # print(f"Top1 Test accuracy: {top1_accuracy.item()}\tTop5 test acc: {top5_accuracy.item()}")
+    # Store loss at the end of the epoch
+    print(f"Top1 Test accuracy: {top1_accuracy.item()}\tTop5 test acc: {top5_accuracy.item()}")
         
 
 
