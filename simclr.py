@@ -118,6 +118,8 @@ class SimCLR(object):
                     features, adv_img = self.model(images, target, make_adv, **attack_kwargs)
                     loss, logits, labels = self.info_nce_loss(features, target)
 
+                #print(logits[0])
+
                 prec1, prec5 = accuracy(logits, labels, topk=(1, 5))
                 prec1, prec5 = prec1[0], prec5[0]
                 

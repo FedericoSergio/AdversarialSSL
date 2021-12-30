@@ -15,7 +15,6 @@ import torchvision.transforms as transforms
 from torchvision import datasets
 from torch.utils.tensorboard import SummaryWriter
 import logging
-from models.resnet_eval import ResNetEval
 
 from utils import save_config_file, accuracy, save_checkpoint
 
@@ -35,7 +34,7 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                          ' (default: resnet50)')
 parser.add_argument('-j', '--workers', default=12, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
-parser.add_argument('--epochs', default=150, type=int, metavar='N',
+parser.add_argument('--epochs', default=250, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('-b', '--batch-size', default=256, type=int,
                     metavar='N',
@@ -50,11 +49,11 @@ parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
 
-parser.add_argument('--checkpoint', default='../runs/[cifar100]_BS=256_LR=2e-4_eps=0.5/checkpoint_0500.pth.tar',
+parser.add_argument('--checkpoint', default='../runs/[cifar]_BS=256_LR=2e-4_eps=0.5/checkpoint_0500.pth.tar',
                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
-parser.add_argument('--pretrained-dataset', default='cifar100',
+parser.add_argument('--pretrained-dataset', default='cifar10',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
-parser.add_argument('--eps', '--eps', default=0.2, type=float,
+parser.add_argument('--eps', '--eps', default=0.5, type=float,
                     metavar='EPS', help='WARNING! Only to point out eps of pretrained model in filename', dest='eps')
 
 
@@ -162,7 +161,7 @@ def main():
         del state_dict[k]
     
     log = model.load_state_dict(state_dict, strict=False)
-    assert log.missing_keys == ['backbone.fc.weight', 'backbone.fc.bias']
+    assert log.missing_keys == ['fc.weight', 'fc.bias']
 
 
     if args.dataset_name == 'cifar10':
@@ -175,7 +174,7 @@ def main():
 
     # freeze all layers but the last fc
     for name, param in model.named_parameters():
-        if name not in ['backbone.fc.weight', 'backbone.fc.bias']:
+        if name not in ['fc.weight', 'fc.bias']:
             param.requires_grad = False
     
     parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -196,6 +195,13 @@ def main():
     logging.info(f"Pre-trained model loaded: {args.checkpoint}.")
     logging.info(f"Training with gpu: {args.disable_cuda}.")
 
+    attack_kwargs = {
+            'eps': args.eps,
+            'step_size': 1,
+            'iterations': 3
+            #'bypass' : 0
+        }
+
     epochs = 100
     for epoch in range(epochs):
         top1_train_accuracy = 0
@@ -203,7 +209,9 @@ def main():
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
 
-            logits = model(x_batch)
+            adv_img = make_adv(model, x_batch, y_batch, **attack_kwargs)
+
+            logits = model(adv_img)
             loss = criterion(logits, y_batch)
             top1 = accuracy(logits, y_batch, topk=(1,))
             top1_train_accuracy += top1[0]
@@ -227,6 +235,8 @@ def main():
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
 
+            adv_img = make_adv(model, x_batch, y_batch, **attack_kwargs)
+
             logits = model(x_batch)
 
             top1, top5 = accuracy(logits, y_batch, topk=(1,5))
@@ -246,87 +256,6 @@ def main():
         logging.debug(f"Epoch {epoch}\tTop1 Train accuracy {top1_train_accuracy.item()}\tTop1 Test accuracy: {top1_accuracy.item()}\tTop5 test acc: {top5_accuracy.item()}")
     
     logging.info("Evaluation has finished.\n")
-
-
-
-
-
-
-
-    attack_kwargs = {
-            'eps': args.eps,
-            'step_size': 1,
-            'iterations': 3
-            #'bypass' : 0
-        }
-
-    nat_mis = torch.zeros([1, 3, 32, 32])
-    adv_mis = torch.zeros([1, 3, 32, 32])
-    missed_class = torch.zeros([10])
-    correct_class = torch.zeros([10])
-
-    top1_accuracy = 0
-    top5_accuracy = 0
-
-    for counter, (x_batch, y_batch) in enumerate(test_loader):
-        x_batch = x_batch.to(device)
-        y_batch = y_batch.to(device)
-
-        adv_img = make_adv(x_batch, y_batch, **attack_kwargs)
-
-        with torch.no_grad():
-            logits = model(adv_img)
-            top1, top5 = accuracy(logits, y_batch, topk=(1,5))
-            top1_accuracy += top1[0]
-            top5_accuracy += top5[0]
-
-        predictions = torch.argmax(logits, dim=1)
-        for sampleno in range(x_batch.size(0)):
-            if(y_batch[sampleno]!=predictions[sampleno]):
-                    
-                # Store first i misclassification in tensorboard
-                for i in range(1):
-                    if torch.equal(nat_mis[i, ...], torch.zeros([3, 32, 32])):
-                        nat_mis[i] = x_batch[sampleno]
-                        adv_mis[i] = adv_img[sampleno]
-                        print(f"|Step {counter}|:\tReal Label: {y_batch[sampleno]}\tPredicted: {predictions[sampleno]}")
-                        break
-                    
-                missed_class[y_batch[sampleno]] += 1    
-            else:
-                correct_class[y_batch[sampleno]] += 1
-
-        writer.add_scalar('acc/FT/TEST_acc-Top1', top1_accuracy.item()/(counter+1), global_step=n_iter_test)
-        writer.add_scalar('acc/FT/TEST_acc-Top5', top5_accuracy.item()/(counter+1), global_step=n_iter_test)
-            
-        # Print missclasified image and respective adversarial version
-        # nat_image = make_grid(nat_mis[:args.range, ...])
-        # adv_image = make_grid(adv_mis[:args.range, ...])
-        writer.add_image('Misclassified Natural Image', nat_mis[i] , counter)
-        writer.add_image('Misclassified Adversarial Image', adv_mis[i], counter)
-
-        # Reset images visualization tensors
-        nat_mis = torch.zeros([1, 3, 32, 32])
-        adv_mis = torch.zeros([1, 3, 32, 32])
-
-        n_iter_test += 1
-    
-    top1_accuracy /= (counter + 1)
-    top5_accuracy /= (counter + 1)
-
-    print(f"Missed Classes: {missed_class.t()}")
-    print(f"Correct Classes: {correct_class.t()}")
-
-    # Store loss at the end of the epoch
-    print(f"Top1 Test accuracy: {top1_accuracy.item()}\tTop5 test acc: {top5_accuracy.item()}")
-        
-
-
-
-
-
-
-
 
     # save model checkpoints
     checkpoint_name = 'checkpoint_{:04d}.pth.tar'.format(args.epochs)
