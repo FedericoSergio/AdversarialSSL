@@ -15,6 +15,7 @@ import torchvision.transforms as transforms
 from torchvision import datasets
 from torch.utils.tensorboard import SummaryWriter
 import logging
+from torchvision.models.feature_extraction import get_graph_node_names, create_feature_extractor
 
 from utils import save_config_file, accuracy, save_checkpoint
 
@@ -34,7 +35,7 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                          ' (default: resnet50)')
 parser.add_argument('-j', '--workers', default=12, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
-parser.add_argument('--epochs', default=250, type=int, metavar='N',
+parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('-b', '--batch-size', default=256, type=int,
                     metavar='N',
@@ -49,12 +50,12 @@ parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
 
-parser.add_argument('--checkpoint', default='../runs/[cifar]_BS=256_LR=2e-4_eps=0.5/checkpoint_0500.pth.tar',
+parser.add_argument('--checkpoint', default='../runs/[cifar10]_BS=256_LR=0.0002_eps=1/checkpoint_0500.pth.tar',
                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
 parser.add_argument('--pretrained-dataset', default='cifar10',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
-parser.add_argument('--eps', '--eps', default=0.5, type=float,
-                    metavar='EPS', help='WARNING! Only to point out eps of pretrained model in filename', dest='eps')
+parser.add_argument('--eps', '--eps', default=1, type=float,
+                    metavar='EPS', help='eps of pretrained model in filename', dest='eps')
 
 
 parser.add_argument('--disable-cuda', action='store_true',
@@ -115,7 +116,10 @@ def get_stl10_data_loaders(path, download, shuffle=False, batch_size=256):
                                 num_workers=10, drop_last=False, shuffle=shuffle)
     return train_loader, test_loader
 
-
+def set_bn_eval(module):
+    with torch.no_grad():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.eval()
 
 def main():
     args = parser.parse_args()
@@ -133,7 +137,7 @@ def main():
     print("Using device:", device)
 
     # Initialize writer for Tensorboard
-    folder_name = "runs/FT/["+ str(args.ftDataset) + "-" + str(args.dataset_name) +  "]_BS=" + str(args.bs) + "_LR=" + str(args.lr) + "_ADVModelEps=" + str(args.eps)
+    folder_name = "runs/FT/["+ str(args.ftDataset) + "-" + str(args.dataset_name) +  "]_BS=" + str(args.bs) + "_LR=" + str(args.lr) + "_FTeps=" + str(args.eps)
 
     writer = SummaryWriter(log_dir=folder_name)
     logging.basicConfig(filename=os.path.join(writer.log_dir, 'training.log'), level=logging.DEBUG)
@@ -159,11 +163,15 @@ def main():
                 # remove prefix
                 state_dict[k[len("backbone."):]] = state_dict[k]
         del state_dict[k]
+
+    for name, module in model.named_modules():
+        print(name)
+        if name is not 'fc':
+            module.eval()
     
     log = model.load_state_dict(state_dict, strict=False)
     assert log.missing_keys == ['fc.weight', 'fc.bias']
-
-
+        
     if args.dataset_name == 'cifar10':
         train_loader, test_loader = get_cifar10_data_loaders(args.dataset_path, download=True, batch_size=args.bs)
     elif args.dataset_name == 'cifar100':
@@ -172,17 +180,26 @@ def main():
         train_loader, test_loader = get_stl10_data_loaders(args.dataset_path, download=True, batch_size=args.bs)
     print("Dataset:", args.dataset_name)
 
+    # defining list of parameters to update
+    ft_params = []
+
     # freeze all layers but the last fc
     for name, param in model.named_parameters():
         if name not in ['fc.weight', 'fc.bias']:
+            #print(name)
             param.requires_grad = False
+        else:
+            ft_params.append({'params' : param})
+
+    #print(ft_params)
+    #print(model)
     
     parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     assert len(parameters) == 2  # fc.weight, fc.bias
-
     print(args)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # set model batch norms to evaluation mode
+    optimizer = torch.optim.Adam(ft_params, lr=args.lr, weight_decay=args.weight_decay) #model.parameters()
     criterion = torch.nn.CrossEntropyLoss().to(device)
 
     
@@ -202,14 +219,17 @@ def main():
             #'bypass' : 0
         }
 
-    epochs = 100
-    for epoch in range(epochs):
+    for epoch in range(args.epochs):
         top1_train_accuracy = 0
         for counter, (x_batch, y_batch) in enumerate(train_loader):
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
 
             adv_img = make_adv(model, x_batch, y_batch, **attack_kwargs)
+
+            # for name, param in model.named_parameters():
+            #     print(name)
+            #     print(param.requires_grad)
 
             logits = model(adv_img)
             loss = criterion(logits, y_batch)
@@ -225,7 +245,6 @@ def main():
                 writer.add_scalar('acc/FT/TRAIN_acc-Top1', top1_train_accuracy.item()/(counter+1), global_step=n_iter_train)
             
             n_iter_train += 1
-
 
         top1_train_accuracy /= (counter + 1)
         top1_accuracy = 0

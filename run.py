@@ -13,7 +13,7 @@ model_names = sorted(name for name in models.__dict__
 parser = argparse.ArgumentParser(description='PyTorch SimCLR')
 parser.add_argument('-data', metavar='DIR', default='/datasets/',
                     help='path to dataset')
-parser.add_argument('-dataset-name', default='cifar10',
+parser.add_argument('-dataset-name', default='cifar100',
                     help='dataset name', choices=['stl10', 'cifar10','cifar100'])
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     choices=model_names,
@@ -36,7 +36,7 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                          'using Data Parallel or Distributed Data Parallel', dest='bs')
 parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
-parser.add_argument('--eps', '--eps', default=0.5, type=float,
+parser.add_argument('--eps', '--eps', default=1, type=float,
                     metavar='EPS', help='epsilon parameter for adversarial training', dest='eps')
 
 
@@ -79,7 +79,6 @@ def main():
         num_workers=args.workers, pin_memory=True, drop_last=True)
 
     model = ResNetSimCLR(base_model=args.arch, out_dim=args.out_dim)
-
     optimizer = torch.optim.Adam(model.parameters(), args.lr, weight_decay=args.weight_decay)
 
     scheduler = None #torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(train_loader), eta_min=0,

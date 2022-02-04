@@ -5,11 +5,13 @@ import sys
 
 import torch
 import torch.nn.functional as F
+import math
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from torchvision.utils import make_grid
 from utils import save_config_file, accuracy, save_checkpoint
+from torchvision.utils import save_image
 
 torch.manual_seed(0)
 
@@ -66,9 +68,8 @@ class SimCLR(object):
         # select and combine multiple positives
         positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
 
-        # select only the negatives the negatives
+        # select only the negatives
         negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
-
         logits = torch.cat([positives, negatives], dim=1)
         labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.args.device)
 
@@ -90,8 +91,7 @@ class SimCLR(object):
             'eps': self.args.eps,
             'step_size': 1,
             'iterations': 3,
-            'custom_loss': self.info_nce_loss,
-            #'bypass' : 0
+            'custom_loss': self.info_nce_loss
         }
 
         # Speed up training if eps=0
@@ -100,7 +100,15 @@ class SimCLR(object):
         else:
             make_adv = True
 
+        # l1grad = torch.zeros([64, 64, 3, 3]).to(self.args.device)
+        # l2grad = torch.zeros([128, 128, 3, 3]).to(self.args.device)
+        # l3grad = torch.zeros([256, 256, 3, 3]).to(self.args.device)
+        # l4grad = torch.zeros([512, 512, 3, 3]).to(self.args.device)
+
+        # grad_sum = torch.zeros(l4grad.shape[0]).to(self.args.device)
+
         n_iter = 0
+        img_path = "/home/sefe/AdversarialSSL/"
 
         for epoch_counter in range(self.args.epochs):
             
@@ -116,9 +124,8 @@ class SimCLR(object):
 
                 with autocast(enabled=self.args.fp16_precision):
                     features, adv_img = self.model(images, target, make_adv, **attack_kwargs)
+                    
                     loss, logits, labels = self.info_nce_loss(features, target)
-
-                #print(logits[0])
 
                 prec1, prec5 = accuracy(logits, labels, topk=(1, 5))
                 prec1, prec5 = prec1[0], prec5[0]
@@ -133,6 +140,23 @@ class SimCLR(object):
 
                 scaler.step(self.optimizer)
                 scaler.update()
+
+                #for name, param in self.model.named_parameters():
+
+                    #grad_sum += torch.reshape(torch.abs(param.grad), (-1,))
+                    # try:
+                    #     if name.startswith('backbone.layer1'):
+                    #         l1grad += torch.abs(param.grad) #torch.reshape(x, (-1,))
+                    #     if name.startswith('backbone.layer2'):
+                    #         l2grad += torch.abs(param.grad)
+                    #     if name.startswith('backbone.layer3'):
+                    #         l3grad += torch.abs(param.grad)
+                    #     if name.startswith('backbone.layer4'):
+                    #         l4grad += torch.abs(param.grad)
+                    # except:
+                    #     RuntimeError
+                
+                #grad_sum = torch.reshape(l1grad, (-1,)) + torch.reshape(l2grad, (-1,)) + torch.reshape(l3grad, (-1,)) + torch.reshape(l4grad, (-1,))
 
                 if n_iter % self.args.log_every_n_steps == 0:
 
