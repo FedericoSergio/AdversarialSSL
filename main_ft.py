@@ -50,11 +50,11 @@ parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
 
-parser.add_argument('--checkpoint', default='../runs/[cifar10]_BS=256_LR=0.0002_eps=1/checkpoint_0500.pth.tar',
+parser.add_argument('--checkpoint', default='../runs/[cifar100]_BS=256_LR=0.0002_eps=1/checkpoint_0500.pth.tar',
                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
-parser.add_argument('--pretrained-dataset', default='cifar10',
+parser.add_argument('--pretrained-dataset', default='cifar100',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
-parser.add_argument('--eps', '--eps', default=1, type=float,
+parser.add_argument('--eps', '--eps', default=0, type=float,
                     metavar='EPS', help='eps of pretrained model in filename', dest='eps')
 
 
@@ -65,7 +65,7 @@ parser.add_argument('--fp16-precision', action='store_true',
 
 parser.add_argument('--out_dim', default=128, type=int,
                     help='feature dimension (default: 128)')
-parser.add_argument('--log-every-n-steps', default=100, type=int,
+parser.add_argument('--log-every-n-steps', default=25, type=int,
                     help='Log every n steps')
 parser.add_argument('--temperature', default=0.07, type=float,
                     help='softmax temperature (default: 0.07)')

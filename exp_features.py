@@ -1,3 +1,4 @@
+from pyexpat import features
 from numpy.lib.npyio import savetxt
 from models.make_adv import make_adv
 import torch
@@ -59,14 +60,14 @@ parser.add_argument('--seed', default=None, type=int,
 
 # parser.add_argument('--checkpoint', default='../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_ADVModelEps=0/checkpoint_0500.pth.tar',
 #                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
-parser.add_argument('--pretrained-dataset', default='cifar10',
+parser.add_argument('--pretrained-dataset', default='cifar100',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
-# parser.add_argument('--eps', '--eps', default=3, type=float,
-#                     metavar='EPS', help='eps to apply to test images', dest='eps')
+parser.add_argument('--eps', '--eps', default=5, type=float,
+                    metavar='EPS', help='eps to apply to test images', dest='eps')
 parser.add_argument('--range', '--range', default=16, type=int,
                     metavar='RANGE', help='...', dest='range')
 
-parser.add_argument('--perplexity', default=50, type=int,
+parser.add_argument('--perplexity', default=35, type=int,
                     metavar='perplexity', help='...', dest='perplexity')
 
 parser.add_argument('--disable-cuda', action='store_true',
@@ -143,173 +144,166 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}\tIndex: {torch.cuda.device_count()}")
 
-    checkpoint_list = [ '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.8/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.1/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.2/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.3/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.4/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.5/checkpoint_0100.pth.tar' 
-                        ]
+    # Initialize writer for Tensorboard
+    folder_name = "runs/EVAL/["+ str(args.ftDataset) + "-" + str(args.dataset_name) + "]_perplexity=" + str(args.perplexity)
 
-    eps_list = [1, 0.2, 0.4, 0.6, 0.8, 1]
+    # Create folder for images
+    img_path = "/home/sefe/AdversarialSSL/" + folder_name + "/images/"
+    try:
+        os.makedirs(os.path.dirname(img_path))
+    except FileExistsError:
+        print('Path is not correctly defined.')
 
-    header = {'FT Model' : ['0', '0.2', '0.4', '0.6', '0.8', '1']}
-    acc_table = {}
+    writer = SummaryWriter(log_dir=folder_name)
+    logging.basicConfig(filename=os.path.join(writer.log_dir, 'training.log'), level=logging.DEBUG)
 
-    acc_table.update(header)
-    print(acc_table) 
+    if args.dataset_name == 'cifar10':
+        model_2 = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
+        model_1 = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
+    elif args.dataset_name == 'cifar100':
+        model_2 = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
+        model_1 = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
 
-    for checkpoint in range(len(checkpoint_list)):
+    ckpt_1 = torch.load('../runs/FT/[cifar100-cifar10]_BS=256_LR=8e-05_FTeps=0/checkpoint_0100.pth.tar', map_location=device)
+    state_dict_1 = ckpt_1['state_dict']
 
-        acc_row_val = []
+    ckpt_2 = torch.load('../runs/FT/[cifar100-cifar10]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar', map_location=device)
+    state_dict_2 = ckpt_2['state_dict']
 
-        for eps in range(len(eps_list)):
+    return_nodes = {
+        'x' : 'inputs',
+        'maxpool' : 'maxpool',
+        'layer4.1.relu_1' : 'Layer 4',
+        'avgpool' : 'avgpool',
+        'fc' : 'Linear Layer',
+    }
 
-            # Initialize writer for Tensorboard
-            folder_name = "runs/EVAL/["+ str(args.ftDataset) + "-" + str(args.dataset_name) + "_FTeps=" + str(eps_list[checkpoint]) + "_perplexity=" + str(args.perplexity)
-
-            # Create folder for images
-            img_path = "/home/sefe/AdversarialSSL/" + folder_name + "/images/"
-            try:
-                os.makedirs(os.path.dirname(img_path))
-            except FileExistsError:
-                break
-
-            writer = SummaryWriter(log_dir=folder_name)
-            logging.basicConfig(filename=os.path.join(writer.log_dir, 'training.log'), level=logging.DEBUG)
-
-            if args.dataset_name == 'cifar10':
-                model_linear = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
-                model_simclr = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
-            elif args.dataset_name == 'cifar100':
-                model_linear = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
-                model_simclr = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
-
-            ckpt_linear = torch.load(checkpoint_list[checkpoint], map_location=device)
-            state_dict_linear = ckpt_linear['state_dict']
-
-            ckpt_simclr = torch.load('../runs/[cifar10]_BS=256_LR=0.0002_eps=0.8/checkpoint_0500.pth.tar', map_location=device)
-            state_dict_simclr = ckpt_simclr['state_dict']
-
-            return_nodes = {
-                'layer1.1.conv2' : 'layer1',
-                'layer2.1.conv2' : 'layer2',
-                'layer3.1.conv2' : 'layer3',
-                'layer4.1.conv2' : 'layer4',
-                'fc' : 'fc',
-            }
-
-            #---------------LOADING SIMCLR WEIGHTS---------------#
-            for k in list(state_dict_simclr.keys()):
-                if k.startswith('backbone.'):
-                    if k.startswith('backbone'): #and not k.startswith('backbone.fc')
-                        # remove prefix
-                        state_dict_simclr[k[len("backbone."):]] = state_dict_simclr[k]
-                del state_dict_simclr[k]
-            
-            log = model_simclr.load_state_dict(state_dict_simclr, strict=False)
-            assert log.missing_keys == ['fc.weight', 'fc.bias']
-
-            nodes, _ = get_graph_node_names(model_simclr)
-
-            feature_extractor_simclr = create_feature_extractor(model_simclr, return_nodes=return_nodes).cuda()
-            #----------------------------------------------------#
-
-            #---------------LOADING LINEAR WEIGHTS---------------#
-            log = model_linear.load_state_dict(state_dict_linear, strict=True)
-
-            nodes, _ = get_graph_node_names(model_linear)
-
-            feature_extractor_linear = create_feature_extractor(model_linear, return_nodes=return_nodes).cuda()
-            #----------------------------------------------------#
-
-            model_linear.eval()
-            model_simclr.eval()
-
-            if (torch.equal(feature_extractor_simclr(torch.zeros(2, 3, 32, 32).cuda())['layer3'], feature_extractor_linear(torch.zeros(2, 3, 32, 32).cuda())['layer3'])):
-                print('ALCUNI LAYER SONO IDENTICI..')
-
-            if args.dataset_name == 'cifar10':
-                train_loader, test_loader = get_cifar10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
-                num_classes = 10
-                classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
-            elif args.dataset_name == 'cifar100':
-                train_loader, test_loader = get_cifar100_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
-                num_classes = 100
-                classes = [
-                        'apple', 'aquarium_fish', 'baby', 'bear', 'beaver', 'bed', 'bee', 'beetle',
-                        'bicycle', 'bottle', 'bowl', 'boy', 'bridge', 'bus', 'butterfly', 'camel',
-                        'can', 'castle', 'caterpillar', 'cattle', 'chair', 'chimpanzee', 'clock',
-                        'cloud', 'cockroach', 'couch', 'crab', 'crocodile', 'cup', 'dinosaur',
-                        'dolphin', 'elephant', 'flatfish', 'forest', 'fox', 'girl', 'hamster',
-                        'house', 'kangaroo', 'keyboard', 'lamp', 'lawn_mower', 'leopard', 'lion',
-                        'lizard', 'lobster', 'man', 'maple_tree', 'motorcycle', 'mountain', 'mouse',
-                        'mushroom', 'oak_tree', 'orange', 'orchid', 'otter', 'palm_tree', 'pear',
-                        'pickup_truck', 'pine_tree', 'plain', 'plate', 'poppy', 'porcupine',
-                        'possum', 'rabbit', 'raccoon', 'ray', 'road', 'rocket', 'rose',
-                        'sea', 'seal', 'shark', 'shrew', 'skunk', 'skyscraper', 'snail', 'snake',
-                        'spider', 'squirrel', 'streetcar', 'sunflower', 'sweet_pepper', 'table',
-                        'tank', 'telephone', 'television', 'tiger', 'tractor', 'train', 'trout',
-                        'tulip', 'turtle', 'wardrobe', 'whale', 'willow_tree', 'wolf', 'woman',
-                        'worm'
-                    ]
-            elif args.dataset_name == 'stl10':
-                train_loader, test_loader = get_stl10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
-            print("Dataset:", args.dataset_name)
-            
-            # save config file
-            save_config_file(writer.log_dir, args)
-
-            logging.info(f"Training with gpu: {args.disable_cuda}.")
-
-            attack_kwargs = {
-                    'eps': eps_list[eps],
-                    'step_size': 1,
-                    'iterations': 20,
-                    #'bypass' : 0
-                }
-
-            f_task_simclr = torch.zeros(10000)
-            f_task_linear = torch.ones(10000)
-            f_storer_simclr = []
-            f_storer_linear = []
-
-            for counter, (x_batch, y_batch) in enumerate(test_loader):
-                x_batch = x_batch.to(device)
-                y_batch = y_batch.to(device)
-
-                adv_img = make_adv(model_linear, x_batch, y_batch, **attack_kwargs)
-
-                with torch.no_grad():
-                    logits = model_linear(adv_img)
-
-                    # Store data for feature evaluation
-                    out_simclr = feature_extractor_simclr(adv_img)
-                    feature_simclr = out_simclr['layer4']
-                    f_storer_simclr.append(feature_simclr)
-
-                    out_linear = feature_extractor_linear(adv_img)
-                    feature_linear = out_linear['fc']
-                    f_storer_linear.append(feature_linear)
-
-            #f_storer = torch.cat(f_storer, dim=0)
-            f_storer_simclr = torch.cat(f_storer_simclr, dim=0)
-            f_storer_linear = torch.cat(f_storer_linear, dim=0)
-
-            if (args.dataset_name == 'cifar10'):
-
-                # store t-SNE
-                tasks = ['simclr', 'linear']
-                f_storer_simclr = f_storer_simclr.view(10000, -1).cpu()
-                f_storer_linear = f_storer_linear.view(10000, -1).cpu()
-                
-                print(f_storer_simclr.size())
-                print(f_storer_linear.size())
-                output_tsne_data_simclr = get_tsne(f_storer_simclr, perplexity=50)
-                output_tsne_data_linear = get_tsne(f_storer_linear, perplexity=50)
-                plot_representations(output_tsne_data_simclr, f_task_simclr, classes=tasks, img_path=img_path, filename='t-SNE_simclr.png')
-                plot_representations(output_tsne_data_linear, f_task_linear, classes=tasks, img_path=img_path, filename='t-SNE_linear.png')
+    #---------------LOADING SIMCLR WEIGHTS---------------#
+    # for k in list(state_dict_1.keys()):
+    #     if k.startswith('backbone.'):
+    #         if k.startswith('backbone'): #and not k.startswith('backbone.fc')
+    #             # remove prefix
+    #             state_dict_1[k[len("backbone."):]] = state_dict_1[k]
+    #     del state_dict_1[k]
     
+    log = model_1.load_state_dict(state_dict_1, strict=False)
+    #assert log.missing_keys == ['fc.weight', 'fc.bias']
+
+    nodes, _ = get_graph_node_names(model_1)
+
+    feature_extractor_1 = create_feature_extractor(model_1, return_nodes=return_nodes).to(device)
+    #----------------------------------------------------#
+
+    #---------------LOADING LINEAR WEIGHTS---------------#
+    log = model_2.load_state_dict(state_dict_2, strict=True)
+
+    nodes, _ = get_graph_node_names(model_2)
+
+    feature_extractor_2 = create_feature_extractor(model_2, return_nodes=return_nodes).to(device)
+    #----------------------------------------------------#
+
+    model_2.eval()
+    model_1.eval()
+
+    if (torch.equal(feature_extractor_1(torch.zeros(2, 3, 32, 32).to(device))['avgpool'], feature_extractor_2(torch.zeros(2, 3, 32, 32).to(device))['avgpool'])):
+        print('ALCUNI LAYER SONO IDENTICI..')
+
+    if args.dataset_name == 'cifar10':
+        train_loader, test_loader = get_cifar10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
+        num_classes = 10
+        classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+    elif args.dataset_name == 'cifar100':
+        train_loader, test_loader = get_cifar100_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
+        num_classes = 100
+        classes = [
+                'apple', 'aquarium_fish', 'baby', 'bear', 'beaver', 'bed', 'bee', 'beetle',
+                'bicycle', 'bottle', 'bowl', 'boy', 'bridge', 'bus', 'butterfly', 'camel',
+                'can', 'castle', 'caterpillar', 'cattle', 'chair', 'chimpanzee', 'clock',
+                'cloud', 'cockroach', 'couch', 'crab', 'crocodile', 'cup', 'dinosaur',
+                'dolphin', 'elephant', 'flatfish', 'forest', 'fox', 'girl', 'hamster',
+                'house', 'kangaroo', 'keyboard', 'lamp', 'lawn_mower', 'leopard', 'lion',
+                'lizard', 'lobster', 'man', 'maple_tree', 'motorcycle', 'mountain', 'mouse',
+                'mushroom', 'oak_tree', 'orange', 'orchid', 'otter', 'palm_tree', 'pear',
+                'pickup_truck', 'pine_tree', 'plain', 'plate', 'poppy', 'porcupine',
+                'possum', 'rabbit', 'raccoon', 'ray', 'road', 'rocket', 'rose',
+                'sea', 'seal', 'shark', 'shrew', 'skunk', 'skyscraper', 'snail', 'snake',
+                'spider', 'squirrel', 'streetcar', 'sunflower', 'sweet_pepper', 'table',
+                'tank', 'telephone', 'television', 'tiger', 'tractor', 'train', 'trout',
+                'tulip', 'turtle', 'wardrobe', 'whale', 'willow_tree', 'wolf', 'woman',
+                'worm'
+            ]
+    elif args.dataset_name == 'stl10':
+        train_loader, test_loader = get_stl10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
+    print("Dataset:", args.dataset_name)
+    
+    # save config file
+    save_config_file(writer.log_dir, args)
+
+    logging.info(f"Training with gpu: {args.disable_cuda}.")
+
+    attack_kwargs = {
+            'eps': args.eps,
+            'step_size': 1,
+            'iterations': 20,
+            #'bypass' : 0
+        }
+
+    f_task_1 = torch.zeros(10000)
+    f_task_2 = torch.ones(10000)
+    f_storer_1 = [(), (), (), (), ()]
+    f_storer_2 = [(), (), (), (), ()]
+
+    for counter, (x_batch, y_batch) in enumerate(test_loader):
+        x_batch = x_batch.to(device)
+        y_batch = y_batch.to(device)
+
+        adv_img = make_adv(model_2, x_batch, y_batch, **attack_kwargs)
+
+        with torch.no_grad():
+            logits = model_2(adv_img)
+
+            # Store data for feature evaluation
+            out_1 = feature_extractor_1(adv_img)
+            
+            feature_1_l1 = out_1['inputs'].reshape(out_1['inputs'].size(0), -1)
+            f_storer_1[0] = f_storer_1[0] + (feature_1_l1,)
+            feature_1_l2 = out_1['maxpool'].reshape(out_1['maxpool'].size(0), -1)
+            f_storer_1[1] = f_storer_1[1] + (feature_1_l2,)
+            feature_1_l3 = out_1['Layer 4'].reshape(out_1['Layer 4'].size(0), -1)
+            f_storer_1[2] = f_storer_1[2] + (feature_1_l3,)
+            feature_1_l4 = out_1['avgpool'].reshape(out_1['avgpool'].size(0), -1)
+            f_storer_1[3] = f_storer_1[3] + (feature_1_l4,)
+            feature_1_fc = out_1['Linear Layer'].reshape(out_1['Linear Layer'].size(0), -1)
+            f_storer_1[4] = f_storer_1[4] + (feature_1_fc,)
+
+            out_2 = feature_extractor_2(adv_img)
+
+            feature_2_l1 = out_2['inputs'].reshape(out_2['inputs'].size(0), -1)
+            f_storer_2[0] = f_storer_2[0] + (feature_2_l1,)
+            feature_2_l2 = out_2['maxpool'].reshape(out_2['maxpool'].size(0), -1)
+            f_storer_2[1] = f_storer_2[1] + (feature_2_l2,)
+            feature_2_l3 = out_2['Layer 4'].reshape(out_2['Layer 4'].size(0), -1)
+            f_storer_2[2] = f_storer_2[2] + (feature_2_l3,)
+            feature_2_l4 = out_2['avgpool'].reshape(out_2['avgpool'].size(0), -1)
+            f_storer_2[3] = f_storer_2[3] + (feature_2_l4,)
+            feature_2_fc = out_2['Linear Layer'].reshape(out_2['Linear Layer'].size(), -1)
+            f_storer_2[4] = f_storer_2[4] + (feature_2_fc,)
+
+    for i in range(len(f_storer_1)):
+        f_storer_1[i] = torch.cat(f_storer_1[i], dim=0).cpu()
+        f_storer_2[i] = torch.cat(f_storer_2[i], dim=0).cpu()
+
+    # store t-SNE
+    tasks = ['simclr', 'linear']
+    for i in range(len(f_storer_1)):
+    
+        print(f_storer_1[i].size())
+        print(f_storer_2[i].size())
+        output_tsne_data_1 = get_tsne(f_storer_1[i], perplexity=args.perplexity)
+        output_tsne_data_2 = get_tsne(f_storer_2[i], perplexity=args.perplexity)
+        plot_representations(output_tsne_data_1, f_task_1, classes=tasks, img_path=img_path, filename='t-SNE1_'+list(return_nodes.values())[i] + '.png', plotname='t-SNE in '+list(return_nodes.values())[i]+' of [' +str(args.ftDataset) + '-' + str(args.dataset_name) + ']')
+        plot_representations(output_tsne_data_2, f_task_2, classes=tasks, img_path=img_path, filename='t-SNE2_'+list(return_nodes.values())[i] + '.png', plotname='t-SNE in '+list(return_nodes.values())[i]+' of [' +str(args.ftDataset) + '-' + str(args.dataset_name) + ']')
+
     logging.info("Test has finished.")
 
 def plot_intensity_hist(img_path, filename, plot_name):
@@ -350,7 +344,7 @@ def get_pca(data, n_components = 2):
     pca_data = pca.fit_transform(data)
     return pca_data
 
-def plot_representations(data, labels, img_path, filename, classes=None, n_images=None):
+def plot_representations(data, labels, img_path, filename, plotname, classes=None, n_images=None):
             
     if n_images is not None:
         data = data[:n_images]
@@ -365,7 +359,7 @@ def plot_representations(data, labels, img_path, filename, classes=None, n_image
     handles = [plt.Line2D([],[],marker="o", ls="", 
                         color=scatter.cmap(scatter.norm(yi))) for yi in y]
     plt.legend(handles, classes)
-    ax.set_title(str(filename))
+    ax.set_title(str(plotname))
     fig.savefig(img_path + filename)
 
 def get_tsne(data, n_components = 2, perplexity = 30, n_images = None):
@@ -373,7 +367,7 @@ def get_tsne(data, n_components = 2, perplexity = 30, n_images = None):
     if n_images is not None:
         data = data[:n_images]
         
-    tsne = manifold.TSNE(n_components = n_components, perplexity = perplexity, random_state = 0)
+    tsne = manifold.TSNE(n_components = n_components, perplexity = perplexity, n_iter = 1500, early_exaggeration=48, random_state = 0)
     tsne_data = tsne.fit_transform(data)
     return tsne_data
 

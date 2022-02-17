@@ -44,7 +44,7 @@ parser.add_argument('-j', '--workers', default=12, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
 parser.add_argument('--epochs', default=500, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
+parser.add_argument('-b', '--batch-size', default=1024, type=int,
                     metavar='N',
                     help='mini-batch size (default: 256), this is the total '
                          'batch size of all GPUs on the current node when '
@@ -141,88 +141,84 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}\tIndex: {torch.cuda.device_count()}")
 
-    checkpoint_list = [ '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.2/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.4/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.6/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0.8/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar' 
+    checkpoint_list = [ '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.2/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.4/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.6/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.8/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar' 
                         ]
+    
+    # Initialize writer for Tensorboard
+    folder_name = "runs/EVAL/["+ str(args.ftDataset) + "-" + str(args.dataset_name) +  "]_TestSet=" + str(args.dataset_name)
 
+    # Create folder for images
+    img_path = "/home/sefe/AdversarialSSL/" + folder_name + "/images/"
+    try:
+        os.makedirs(os.path.dirname(img_path))
+    except FileExistsError:
+        print('File exist')
+
+    writer = SummaryWriter(log_dir=folder_name)
+    logging.basicConfig(filename=os.path.join(writer.log_dir, 'training.log'), level=logging.DEBUG)
+
+    if args.dataset_name == 'cifar10':
+        train_loader, test_loader = get_cifar10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
+        num_classes = 10
+        classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+    elif args.dataset_name == 'cifar100':
+        train_loader, test_loader = get_cifar100_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
+        num_classes = 100
+        classes = [
+                'apple', 'aquarium_fish', 'baby', 'bear', 'beaver', 'bed', 'bee', 'beetle',
+                'bicycle', 'bottle', 'bowl', 'boy', 'bridge', 'bus', 'butterfly', 'camel',
+                'can', 'castle', 'caterpillar', 'cattle', 'chair', 'chimpanzee', 'clock',
+                'cloud', 'cockroach', 'couch', 'crab', 'crocodile', 'cup', 'dinosaur',
+                'dolphin', 'elephant', 'flatfish', 'forest', 'fox', 'girl', 'hamster',
+                'house', 'kangaroo', 'keyboard', 'lamp', 'lawn_mower', 'leopard', 'lion',
+                'lizard', 'lobster', 'man', 'maple_tree', 'motorcycle', 'mountain', 'mouse',
+                'mushroom', 'oak_tree', 'orange', 'orchid', 'otter', 'palm_tree', 'pear',
+                'pickup_truck', 'pine_tree', 'plain', 'plate', 'poppy', 'porcupine',
+                'possum', 'rabbit', 'raccoon', 'ray', 'road', 'rocket', 'rose',
+                'sea', 'seal', 'shark', 'shrew', 'skunk', 'skyscraper', 'snail', 'snake',
+                'spider', 'squirrel', 'streetcar', 'sunflower', 'sweet_pepper', 'table',
+                'tank', 'telephone', 'television', 'tiger', 'tractor', 'train', 'trout',
+                'tulip', 'turtle', 'wardrobe', 'whale', 'willow_tree', 'wolf', 'woman',
+                'worm'
+            ]
+    elif args.dataset_name == 'stl10':
+        train_loader, test_loader = get_stl10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
+    print("Dataset:", args.dataset_name)
+    
     eps_list = [0, 0.2, 0.4, 0.6, 0.8, 1]
 
-    header = {'FT Model' : ['0', '0.2', '0.4', '0.6', '0.8', '1']}
     acc_table = {}
     mcc_table = {}
+    hist_eps = [0.2, 0.6, 1]
 
-    acc_table.update(header)
-    mcc_table.update(header)
-    print(acc_table) 
+    print(acc_table)
 
     for checkpoint in range(len(checkpoint_list)):
 
         acc_row = []
         mcc_row = []
+        hist_tot = []
+        
+        model = torchvision.models.resnet18(pretrained=False, num_classes=num_classes).to(device)
+
+        ckpt_linear = torch.load(checkpoint_list[checkpoint], map_location=device)
+        state_dict_linear = ckpt_linear['state_dict']
+
+        log = model.load_state_dict(state_dict_linear, strict=True)
+
+        model.eval()
+        
+        # save config file
+        save_config_file(writer.log_dir, args)
+
+        logging.info(f"Training with gpu: {args.disable_cuda}.")
 
         for eps in range(len(eps_list)):
-
-            # Initialize writer for Tensorboard
-            folder_name = "runs/EVAL/["+ str(args.ftDataset) + "-" + str(args.dataset_name) +  "]_BS=" + str(args.bs) + "_FTeps=" + str(eps_list[checkpoint]) + "_eps(eval)=" + str(eps_list[eps])
-
-            # Create folder for images
-            img_path = "/home/sefe/AdversarialSSL/" + folder_name + "/images/"
-            try:
-                os.makedirs(os.path.dirname(img_path))
-            except FileExistsError:
-                break
-
-            writer = SummaryWriter(log_dir=folder_name)
-            logging.basicConfig(filename=os.path.join(writer.log_dir, 'training.log'), level=logging.DEBUG)
-
-            if args.dataset_name == 'cifar10':
-                model = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
-            elif args.dataset_name == 'cifar100':
-                model = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
-
-            ckpt_linear = torch.load(checkpoint_list[checkpoint], map_location=device)
-            state_dict_linear = ckpt_linear['state_dict']
-
-            log = model.load_state_dict(state_dict_linear, strict=True)
-
-            model.eval()
-
-            if args.dataset_name == 'cifar10':
-                train_loader, test_loader = get_cifar10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
-                num_classes = 10
-                classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
-            elif args.dataset_name == 'cifar100':
-                train_loader, test_loader = get_cifar100_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
-                num_classes = 100
-                classes = [
-                        'apple', 'aquarium_fish', 'baby', 'bear', 'beaver', 'bed', 'bee', 'beetle',
-                        'bicycle', 'bottle', 'bowl', 'boy', 'bridge', 'bus', 'butterfly', 'camel',
-                        'can', 'castle', 'caterpillar', 'cattle', 'chair', 'chimpanzee', 'clock',
-                        'cloud', 'cockroach', 'couch', 'crab', 'crocodile', 'cup', 'dinosaur',
-                        'dolphin', 'elephant', 'flatfish', 'forest', 'fox', 'girl', 'hamster',
-                        'house', 'kangaroo', 'keyboard', 'lamp', 'lawn_mower', 'leopard', 'lion',
-                        'lizard', 'lobster', 'man', 'maple_tree', 'motorcycle', 'mountain', 'mouse',
-                        'mushroom', 'oak_tree', 'orange', 'orchid', 'otter', 'palm_tree', 'pear',
-                        'pickup_truck', 'pine_tree', 'plain', 'plate', 'poppy', 'porcupine',
-                        'possum', 'rabbit', 'raccoon', 'ray', 'road', 'rocket', 'rose',
-                        'sea', 'seal', 'shark', 'shrew', 'skunk', 'skyscraper', 'snail', 'snake',
-                        'spider', 'squirrel', 'streetcar', 'sunflower', 'sweet_pepper', 'table',
-                        'tank', 'telephone', 'television', 'tiger', 'tractor', 'train', 'trout',
-                        'tulip', 'turtle', 'wardrobe', 'whale', 'willow_tree', 'wolf', 'woman',
-                        'worm'
-                    ]
-            elif args.dataset_name == 'stl10':
-                train_loader, test_loader = get_stl10_data_loaders(args.dataset_path, download=True, batch_size=args.bs, shuffle=True)
-            print("Dataset:", args.dataset_name)
-            
-            # save config file
-            save_config_file(writer.log_dir, args)
-
-            logging.info(f"Training with gpu: {args.disable_cuda}.")
 
             attack_kwargs = {
                     'eps': eps_list[eps],
@@ -238,7 +234,7 @@ def main():
             #confusion_matrix_t = torch.zeros([num_classes, num_classes]).to(torch.int)
             y_true = torch.zeros(10000)
             y_pred = torch.zeros(10000)
-
+            hist_list = []
             top1_accuracy = 0
             top5_accuracy = 0
             
@@ -266,34 +262,18 @@ def main():
                                 adv_mis[i] = adv_img[sampleno]
                                 #print(f"|Step {counter}|:\tReal Label: {classes[y_batch[sampleno]]}\tPredicted: {classes[predictions[sampleno]]}")
                                 break
-                        missed_class[y_batch[sampleno]] += 1    
+                        missed_class[y_batch[sampleno]] += 1   
                     else:
                         correct_class[y_batch[sampleno]] += 1
+                        if (eps == 1 or eps == 3 or eps == 5):
+                            #y_list = y_batch.tolist()
+                            hist_list.append(y_batch[sampleno].tolist()) 
                     
                     # MATRIX([true][predicted])
                     #[y_batch[sampleno]][predictions[sampleno]] += 1
                     y_true[k] = y_batch[sampleno]
                     y_pred[k] = predictions[sampleno]
                     k += 1
-                
-                # # Print missclasified images and respective adversarial versions
-                # nat_grid = make_grid(nat_mis[:args.range, ...])
-                # adv_grid = make_grid(adv_mis[:args.range, ...])
-                # writer.add_image('Misclassified Natural Image', nat_grid , counter)
-                # writer.add_image('Misclassified Adversarial Image', adv_grid, counter)
-
-                #if counter == 0:
-                    # Store examples in folder
-                    #save_image(nat_grid, os.path.join(img_path, '{}.png'.format('nat_misclassifications')))
-                    #save_image(adv_grid, os.path.join(img_path, '{}.png'.format('adv_misclassifications')))
-                    #save_image(nat_mis[0], os.path.join(img_path, '{}.png'.format('nat_ex1')))
-                    #save_image(adv_mis[0], os.path.join(img_path, '{}.png'.format('adv_ex1')))
-                    #save_image(nat_mis[1], os.path.join(img_path, '{}.png'.format('nat_ex2')))
-                    #save_image(adv_mis[1], os.path.join(img_path, '{}.png'.format('adv_ex2')))
-
-                # # Reset images visualization tensors
-                # nat_mis = torch.zeros([args.range, 3, 32, 32])
-                # adv_mis = torch.zeros([args.range, 3, 32, 32])
 
             top1_accuracy /= (counter + 1)
             top5_accuracy /= (counter + 1)
@@ -309,14 +289,18 @@ def main():
             
             if (args.dataset_name == 'cifar10'):
                 # store confusion matrix
-                plot_conf_matrix(img_path, y_true, y_pred, classes)
+                plot_conf_matrix(img_path, y_true, y_pred, classes, plot_name='CM of ['+ str(args.ftDataset) + '-' + str(args.dataset_name) +  '] ($\epsilon$ = '+ str(eps_list[checkpoint])+') with Test $\epsilon$ = '+ str(eps_list[eps]), filename='[' + str(eps_list[checkpoint]) + '-' + str(eps_list[eps]) + ']confusion_matrix.png') #[FT-EVAL]confusion_matrix.png
 
                 # store PCA 
                 #output_pca_data = get_pca(logits_storer)
                 #plot_representations(output_pca_data, y_true, classes, img_path, filename='PCA.png')
 
-            acc_row.append(str(round(top1_accuracy.item(), 2)) + "%")
-            mcc_row.append(str(round(mcc_coef)) + "%")
+            acc_row.append(str(round(top1_accuracy.item(), 2)))
+            mcc_row.append(str(round(mcc_coef, 3)))
+
+            # Append eps list of data for histogram
+            if len(hist_list) is not 0:
+                hist_tot.append(hist_list)
 
             print(f"Missed Classes: {missed_class.t()}")
             print(f"Correct Classes: {correct_class.t()}")
@@ -331,54 +315,54 @@ def main():
             print(f"Most correct label: {classes[torch.argmax(correct_class)]} | Most missed label: {classes[torch.argmax(missed_class)]}\n\n")
             logging.debug(f"Most correct label: {classes[torch.argmax(correct_class)]} | Most missed label: {classes[torch.argmax(missed_class)]}\n\n")
 
-
-        acc_table.update({f"0.{checkpoint*2}" : acc_row})
-        mcc_table.update(({f"0.{checkpoint*2}" : mcc_row}))
-        print(acc_table)
-
-        if(checkpoint == 5):
+        if(checkpoint < 5):
+            acc_table.update({f"0.{checkpoint*2}" : acc_row})
+            mcc_table.update(({f"0.{checkpoint*2}" : mcc_row}))
+        else:
+            acc_table.update({f"1" : acc_row})
+            mcc_table.update(({f"1" : mcc_row}))
             break
-
-    df_acc = pd.DataFrame(acc_table)
-    np.savetxt("acc_table.txt", df_acc.to_latex(index=False), fmt='%s')
-    print(df_acc.to_latex(index=False))
-
-    df_mcc = pd.DataFrame(mcc_table)
-    np.savetxt("acc_table.txt", df_mcc.to_latex(index=False), fmt='%s')
-    print(df_mcc.to_latex(index=False))
+        
+        print(len(hist_tot))
+        #print(hist_tot)
     
+        # Plot histogram of miscalssified samples
+        plot_hist(hist_tot, bins=len(classes), label=hist_eps, img_path=img_path, plot_name='Correct Predictions for Robust Model with $\epsilon$ = '+str(eps_list[checkpoint]), filename='missed_samples['+str(eps_list[checkpoint]) +'].png')
+
+    df_acc = pd.DataFrame.from_dict(acc_table, orient='index', columns=['0', '0.2', '0.4', '0.6', '0.8', '1'])
+    print(df_acc.to_latex(index=False))
+    acc_table_txt = open(img_path + 'accuracies.txt', 'w')
+    acc_table_txt.write(df_acc.to_latex(index=False, multirow=True, escape=False))
+    acc_table_txt.close()
+
+    df_mcc = pd.DataFrame.from_dict(mcc_table, orient='index', columns=['0', '0.2', '0.4', '0.6', '0.8', '1'])
+    print(df_mcc.to_latex(index=False))
+    mcc_table_txt = open(img_path + 'mcc_coeff.txt', 'w')
+    mcc_table_txt.write(df_mcc.to_latex(index=False, multirow=True, escape=False))
+    mcc_table_txt.close()
+
     logging.info("Test has finished.")
 
-# def plot_intensity_hist(img_path, filename, plot_name):
-#     fig, ax = plt.subplots()
-#     im = skimage.io.imread(fname=(img_path + filename))
-#     # tuple to select colors of each channel line
-#     colors = ("red", "green", "blue")
-#     channel_ids = (0, 1, 2)
 
-#     # create the histogram plot, with three lines, one for
-#     # each color
-#     plt.xlim([0, 256])
-#     for channel_id, c in zip(channel_ids, colors):
-#         histogram, bin_edges = np.histogram(
-#             im[:, :, channel_id], bins=256, range=(0, 256)
-#         )
-#         plt.plot(bin_edges[0:-1], histogram, color=c)
-#     plt.title("RGB Intensity")
-#     plt.ylabel("Pixel Intensity")
-#     plt.xlabel("Pixel Number")
-#     plt.grid()
-#     #plt.savefig(os.path.join(img_path, '{}.png'.format('Image Intensity')))
-#     fig.savefig(img_path + plot_name)
-#     plt.close(fig)
+def plot_hist(data_list, bins, label, img_path, plot_name, filename):     
+    plt.figure(figsize=(8,6))
+    for i in range(len(data_list)):
+        plt.hist(data_list[i], bins=bins, alpha=0.5, label="Test $\epsilon$ = "+str(label[i]))
+    plt.xlabel("Class Index", size=14)
+    plt.ylabel("Count", size=14)
+    plt.title(plot_name)
+    plt.legend(loc='upper right')
+    plt.savefig(img_path + filename)
 
-def plot_conf_matrix(img_path, y_true, y_pred, classes):
+
+def plot_conf_matrix(img_path, y_true, y_pred, classes, plot_name, filename='confusion_matrix.png'):
     # Make confusion matrix with sklearn
     fig, ax = plt.subplots(figsize=(8, 5))
     cm = mtcs.ConfusionMatrixDisplay(mtcs.confusion_matrix(y_true, y_pred), display_labels=classes)
     cm.plot(ax=ax)
+    plt.title(plot_name)
     #plt.savefig(os.path.join(img_path, '{}.png'.format('confusion_matrix')))
-    fig.savefig(img_path + 'confusion_matrix.png')
+    fig.savefig(img_path + filename)
     plt.close(fig)
 
 def get_pca(data, n_components = 2):

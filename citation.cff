@@ -3,6 +3,6 @@ message: "If you use this software, please cite it as below."
 authors:
   - family-names: Sergio
     given-names: Federico
-title: "Adversarial Self-Supervised Learning on SimCLR framework"
+title: "Robustness Analysis of Self-Supervised Models"
 version: 2.0.4
 date-released: 2022-03-01
