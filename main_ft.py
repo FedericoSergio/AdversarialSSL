@@ -26,7 +26,7 @@ model_names = sorted(name for name in models.__dict__
 parser = argparse.ArgumentParser(description='PyTorch SimCLR')
 parser.add_argument('-data', metavar='DIR', default='/datasets/',
                     help='path to dataset', dest='dataset_path')
-parser.add_argument('-dataset-name', default='cifar10',
+parser.add_argument('-dataset-name', default='cifar100',
                     help='dataset name', choices=['stl10', 'cifar10','cifar100'])
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     choices=model_names,
@@ -50,9 +50,9 @@ parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
 
-parser.add_argument('--checkpoint', default='../runs/[cifar100]_BS=256_LR=0.0002_eps=1/checkpoint_0500.pth.tar',
+parser.add_argument('--checkpoint', default='../runs/[cifar10]_BS=256_LR=0.0002_eps=1/checkpoint_0500.pth.tar',
                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
-parser.add_argument('--pretrained-dataset', default='cifar100',
+parser.add_argument('--pretrained-dataset', default='cifar10',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
 parser.add_argument('--eps', '--eps', default=0, type=float,
                     metavar='EPS', help='eps of pretrained model in filename', dest='eps')

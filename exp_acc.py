@@ -59,7 +59,7 @@ parser.add_argument('--seed', default=None, type=int,
 
 # parser.add_argument('--checkpoint', default='../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_ADVModelEps=0/checkpoint_0500.pth.tar',
 #                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
-parser.add_argument('--pretrained-dataset', default='cifar100',
+parser.add_argument('--pretrained-dataset', default='cifar(robust)',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
 # parser.add_argument('--eps', '--eps', default=3, type=float,
 #                     metavar='EPS', help='eps to apply to test images', dest='eps')
@@ -141,12 +141,10 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}\tIndex: {torch.cuda.device_count()}")
 
-    checkpoint_list = [ '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.2/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.4/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.6/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0.8/checkpoint_0100.pth.tar',
-                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar' 
+    checkpoint_list = [ '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar100-cifar100]_BS=256_LR=8e-05_FTeps=0(eps=1)/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar10-cifar100]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar',
+                        '../runs/FT/[cifar10-cifar100]_BS=256_LR=8e-05_FTeps=0(eps=1)/checkpoint_0100.pth.tar'
                         ]
     
     # Initialize writer for Tensorboard

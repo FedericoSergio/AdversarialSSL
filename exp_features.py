@@ -60,14 +60,14 @@ parser.add_argument('--seed', default=None, type=int,
 
 # parser.add_argument('--checkpoint', default='../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_ADVModelEps=0/checkpoint_0500.pth.tar',
 #                     help='Checkpoint to resume model for fine-tuning.', dest='checkpoint')
-parser.add_argument('--pretrained-dataset', default='cifar100',
+parser.add_argument('--pretrained-dataset', default='cifar10(std1)',
                     help='Name of dataset used in checkpoint model', dest='ftDataset')
-parser.add_argument('--eps', '--eps', default=5, type=float,
+parser.add_argument('--eps', '--eps', default=1, type=float,
                     metavar='EPS', help='eps to apply to test images', dest='eps')
 parser.add_argument('--range', '--range', default=16, type=int,
                     metavar='RANGE', help='...', dest='range')
 
-parser.add_argument('--perplexity', default=35, type=int,
+parser.add_argument('--perplexity', default=50, type=int,
                     metavar='perplexity', help='...', dest='perplexity')
 
 parser.add_argument('--disable-cuda', action='store_true',
@@ -158,16 +158,16 @@ def main():
     logging.basicConfig(filename=os.path.join(writer.log_dir, 'training.log'), level=logging.DEBUG)
 
     if args.dataset_name == 'cifar10':
-        model_2 = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
         model_1 = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
+        model_2 = torchvision.models.resnet18(pretrained=False, num_classes=10).to(device)
     elif args.dataset_name == 'cifar100':
-        model_2 = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
         model_1 = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
+        model_2 = torchvision.models.resnet18(pretrained=False, num_classes=100).to(device)
 
-    ckpt_1 = torch.load('../runs/FT/[cifar100-cifar10]_BS=256_LR=8e-05_FTeps=0/checkpoint_0100.pth.tar', map_location=device)
+    ckpt_1 = torch.load('../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=0(eps=1)/checkpoint_0100.pth.tar', map_location=device)
     state_dict_1 = ckpt_1['state_dict']
 
-    ckpt_2 = torch.load('../runs/FT/[cifar100-cifar10]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar', map_location=device)
+    ckpt_2 = torch.load('../runs/FT/[cifar10-cifar10]_BS=256_LR=8e-05_FTeps=1/checkpoint_0100.pth.tar', map_location=device)
     state_dict_2 = ckpt_2['state_dict']
 
     return_nodes = {
@@ -248,8 +248,6 @@ def main():
             #'bypass' : 0
         }
 
-    f_task_1 = torch.zeros(10000)
-    f_task_2 = torch.ones(10000)
     f_storer_1 = [(), (), (), (), ()]
     f_storer_2 = [(), (), (), (), ()]
 
@@ -293,81 +291,59 @@ def main():
         f_storer_1[i] = torch.cat(f_storer_1[i], dim=0).cpu()
         f_storer_2[i] = torch.cat(f_storer_2[i], dim=0).cpu()
 
-    # store t-SNE
-    tasks = ['simclr', 'linear']
-    for i in range(len(f_storer_1)):
-    
-        print(f_storer_1[i].size())
-        print(f_storer_2[i].size())
-        output_tsne_data_1 = get_tsne(f_storer_1[i], perplexity=args.perplexity)
-        output_tsne_data_2 = get_tsne(f_storer_2[i], perplexity=args.perplexity)
-        plot_representations(output_tsne_data_1, f_task_1, classes=tasks, img_path=img_path, filename='t-SNE1_'+list(return_nodes.values())[i] + '.png', plotname='t-SNE in '+list(return_nodes.values())[i]+' of [' +str(args.ftDataset) + '-' + str(args.dataset_name) + ']')
-        plot_representations(output_tsne_data_2, f_task_2, classes=tasks, img_path=img_path, filename='t-SNE2_'+list(return_nodes.values())[i] + '.png', plotname='t-SNE in '+list(return_nodes.values())[i]+' of [' +str(args.ftDataset) + '-' + str(args.dataset_name) + ']')
+    #ip = torch.cat((f_storer_1[0], f_storer_2[0])).cpu()
+    l4 = torch.cat((f_storer_1[2], f_storer_2[2])).cpu()
+    fc = torch.cat((f_storer_1[4], f_storer_2[4])).cpu()
 
+    #output_tsne_data_ip = np.array(get_tsne(ip, perplexity=args.perplexity))
+    output_tsne_data_l4 = np.array(get_tsne(l4, perplexity=args.perplexity))
+    output_tsne_data_fc = np.array(get_tsne(fc, perplexity=args.perplexity))
+
+    # store t-SNE
+    tasks = ['Standard', 'Robust']
+    f_task = []
+
+    for i in range(10000):
+        f_task.append(0)
+
+    for i in range(10000):
+        f_task.append(1)
+
+    #plot_representations(output_tsne_data_ip, f_task, classes=tasks, img_path=img_path, filename='t-SNE1_input', plotname='t-SNE Inputs')
+    plot_representations(output_tsne_data_l4, f_task, classes=tasks, img_path=img_path, filename='t-SNE1_layer4', plotname='t-SNE Contrastive Layer')
+    plot_representations(output_tsne_data_fc, f_task, classes=tasks, img_path=img_path, filename='t-SNE1_linear', plotname='t-SNE Linear Layer')
+    
     logging.info("Test has finished.")
 
-def plot_intensity_hist(img_path, filename, plot_name):
-    fig, ax = plt.subplots()
-    im = skimage.io.imread(fname=(img_path + filename))
-    # tuple to select colors of each channel line
-    colors = ("red", "green", "blue")
-    channel_ids = (0, 1, 2)
 
-    # create the histogram plot, with three lines, one for
-    # each color
-    plt.xlim([0, 256])
-    for channel_id, c in zip(channel_ids, colors):
-        histogram, bin_edges = np.histogram(
-            im[:, :, channel_id], bins=256, range=(0, 256)
-        )
-        plt.plot(bin_edges[0:-1], histogram, color=c)
-    plt.title("RGB Intensity")
-    plt.ylabel("Pixel Intensity")
-    plt.xlabel("Pixel Number")
-    plt.grid()
-    #plt.savefig(os.path.join(img_path, '{}.png'.format('Image Intensity')))
-    fig.savefig(img_path + plot_name)
-    plt.close(fig)
-
-def plot_conf_matrix(img_path, y_true, y_pred, classes):
-    # Make confusion matrix with sklearn
-    fig, ax = plt.subplots(figsize=(8, 5))
-    cm = mtcs.ConfusionMatrixDisplay(mtcs.confusion_matrix(y_true, y_pred), display_labels=classes)
-    cm.plot(ax=ax)
-    #plt.savefig(os.path.join(img_path, '{}.png'.format('confusion_matrix')))
-    fig.savefig(img_path + 'confusion_matrix.png')
-    plt.close(fig)
-
-def get_pca(data, n_components = 2):
-    pca = decomposition.PCA()
-    pca.n_components = n_components
-    pca_data = pca.fit_transform(data)
-    return pca_data
-
-def plot_representations(data, labels, img_path, filename, plotname, classes=None, n_images=None):
-            
-    if n_images is not None:
-        data = data[:n_images]
-        labels = labels[:n_images]
+def plot_representations(data, labels, img_path, filename, plotname, classes=None):
                 
-    fig = plt.figure(figsize = (15, 15))
+    plt.figure(figsize = (12, 12))
     plt.grid()
-    ax = fig.add_subplot(111)
 
-    scatter = ax.scatter(data[:, 0], data[:, 1], c = labels, cmap = 'hsv')
-    y = np.unique(labels)
-    handles = [plt.Line2D([],[],marker="o", ls="", 
-                        color=scatter.cmap(scatter.norm(yi))) for yi in y]
-    plt.legend(handles, classes)
-    ax.set_title(str(plotname))
-    fig.savefig(img_path + filename)
+    color = ['r', 'b']
+    cmap  =  plt.cm.jet
+
+    # for i in range(len(classes)):
+    #     X_label = data[np.where(labels == i)]
+    #     plt.scatter(X_label[:, 0], X_label[:, 1], label=classes[i], c=color[i], cmap=cmap)
+    plt.scatter(data[:10000, 0], data[:10000, 1], label=classes[0], c=color[0], cmap=cmap, alpha=0.3)
+    plt.scatter(data[10000:, 0], data[10000:, 1], label=classes[1], c=color[1], cmap=cmap, alpha=0.3)
+
+    plt.xlabel("Dim 1", size=12)
+    plt.ylabel("Dim 2", size=12)
+
+    plt.plot()
+    plt.legend()
+    plt.title(plotname)
+    plt.savefig(img_path + filename)
 
 def get_tsne(data, n_components = 2, perplexity = 30, n_images = None):
     
     if n_images is not None:
         data = data[:n_images]
         
-    tsne = manifold.TSNE(n_components = n_components, perplexity = perplexity, n_iter = 1500, early_exaggeration=48, random_state = 0)
+    tsne = manifold.TSNE(n_components = n_components, perplexity = perplexity, n_iter = 5000, early_exaggeration=48, random_state = 0)
     tsne_data = tsne.fit_transform(data)
     return tsne_data
 
